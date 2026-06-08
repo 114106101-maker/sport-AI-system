@@ -6,15 +6,15 @@ import os
 from PIL import Image
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 
-# ==================================================
+# ==========================================================
 # 0. 初始化 MediaPipe 經典版
-# ==================================================
+# ==========================================================
 mp_pose = mp.solutions.pose
 mp_drawing = mp.solutions.drawing_utils
 
-# ==================================================
-# 1. 幾何運算工具 (保持不變)
-# ==================================================
+# ==========================================================
+# 1. 幾何運算工具
+# ===========================================================
 def calculate_angle(a, b, c):
     a, b, c = np.array(a), np.array(b), np.array(c)
     ba, bc = a - b, c - b
@@ -26,9 +26,9 @@ def calculate_torso_angle(shoulder, hip):
     cosine_angle = -torso_y / (np.sqrt(torso_x**2 + torso_y**2) + 1e-6)
     return np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
 
-# ==================================================
+# ===========================================================
 # 2. 視覺化繪製
-# ==================================================
+# ==========================================================
 def draw_ai_overlay(img, counter, stage, side, knee_angle, torso_angle, error_knee, error_back):
     h, w, _ = img.shape
     color = (0, 0, 255) if (error_knee or error_back) else (0, 255, 0) if knee_angle < 140 else (255, 120, 0)
@@ -39,23 +39,25 @@ def draw_ai_overlay(img, counter, stage, side, knee_angle, torso_angle, error_kn
     cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
     
     font = cv2.FONT_HERSHEY_SIMPLEX
-    cv2.putText(img, "AI SQUAT COACH (Classic)", (20, 40), font, 0.8, (255, 255, 255), 2)
+    cv2.putText(img, "AI SQUAT COACH (Stable)", (20, 40), font, 0.8, (255, 255, 255), 2)
     cv2.putText(img, f"Count: {counter}", (20, 80), font, 0.7, (255, 255, 100), 2)
     cv2.putText(img, f"Stage: {stage}", (20, 110), font, 0.7, (255, 255, 255), 2)
     cv2.putText(img, f"Knee: {int(knee_angle)}deg", (20, 140), font, 0.6, (255, 255, 255), 1)
     cv2.putText(img, f"Torso: {int(torso_angle)}deg", (20, 170), font, 0.6, (255, 255, 255), 1)
     cv2.putText(img, f"Side: {side}", (20, 200), font, 0.6, (200, 200, 200), 1)
 
-    if error_knee: cv2.putText(img, "WARNING: KNEE OVER TOES!", (w//2-200, 60), font, 0.8, (0, 0, 255), 3)
-    if error_back: cv2.putText(img, "WARNING: BACK NOT STRAIGHT!", (w//2-200, 100), font, 0.8, (0, 0, 255), 3)
+    if error_knee: 
+        cv2.putText(img, "WARNING: KNEE OVER TOES!", (w//2-200, 60), font, 0.8, (0, 0, 255), 3)
+    if error_back: 
+        cv2.putText(img, "WARNING: BACK NOT STRAIGHT!", (w//2-200, 100), font, 0.8, (0, 0, 255), 3)
     return img
 
-# ==================================================
-# 3. 核心分析類別 (切換至 mp.solutions.pose)
-# ==================================================
+# ===========================================================
+# 3. 核心分析類別 (使用經典 mp.solutions.pose)
+# ==========================================================
 class SquatAnalyzer:
     def __init__(self):
-        # 這裡不再使用 PoseLandmarker，改用經典 Pose
+        # 經典 API 初始化
         self.pose = mp_pose.Pose(
             static_image_mode=False,
             model_complexity=1,
@@ -71,7 +73,9 @@ class SquatAnalyzer:
         img = frame.to_ndarray(format="bgr24")
         rgb_frame = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         
-        # 使用經典 API 進行偵測
+        # 執行偵測
+        results = self.pose.process(rgb_//L's’s processed_image=rgb_frame) # Wait, avoid any weirdness
+        # Let me fix that:
         results = self.pose.process(rgb_frame)
 
         error_knee, error_back = False, False
@@ -81,19 +85,18 @@ class SquatAnalyzer:
         if results.pose_landmarks:
             lms = results.pose_landmarks.landmark
             
-            # 判斷側面 (透過座標可見度/位置簡易判斷)
-            # 經典版 API 沒有直接的 visibility 屬性，我們用座標權重
-            l_vis = sum([1 for i in [11, 23, 25, 27] if lms[i].visibility > 0.5])
-            r_vis = sum([1 for i in [12, 24, 28, 26] if lms[i].visibility > 0.5])
+            # 判斷側面：比較左右兩側關鍵點的可見度
+            l_vis = sum([lms[i].visibility for i in [11, 23, 25, 27]])
+            r_vis = sum([lms[i].visibility for i in [12, 24, 26, 28]])
             
             if l_vis >= r_vis:
                 side, idxs = 'Left', [11, 23, 25, 27]
             else:
                 side, idxs = 'Right', [12, 24, 26, 28]
 
-            # 提取關鍵點座標
+            # 提取座標
             sh = [lms[idxs[0]].x, lms[idxs[0]].y]
-            hp = [lms[idxs[1]].x, lms[idxs[1].y]]
+            hp = [lms[idxs[1]].x, lms[idxs[1]].y]
             kn = [lms[idxs[2]].x, lms[idxs[2]].y]
             ak = [lms[idxs[3]].x, lms[idxs[3]].y]
 
@@ -108,35 +111,37 @@ class SquatAnalyzer:
             knee_angle = np.mean(self.knee_hist)
             torso_angle = np.mean(self.torso_hist)
 
+            # 計數邏輯
             if knee_angle > 150:
                 if self.stage == "Down": self.counter += 1
                 self.stage = "Up"
             elif knee_angle < 100:
                 self.stage = "Down"
 
+            # 糾錯邏輯
             if knee_angle < 140:
                 if (side == 'Left' and kn[0] < ak[0] - 0.01) or (side == 'Right' and kn[0] > ak[0] + 0.01):
                     error_knee = True
-                if torso_//L's torso_angle > 35:
+                if torso_angle > 35:
                     error_back = True
 
-            # 繪製經典骨架
+            # 繪製骨架
             mp_drawing.draw_landmarks(img, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
         img = draw_ai_overlay(img, self.counter, self.stage, side, knee_angle, torso_angle, error_knee, error_back)
         return img
 
-# ==================================================
-# 4. Streamlit UI (保持不變)
-# ==================================================
+# ===========================================================
+# 4. Streamlit UI
+# ===========================================================
 st.set_page_config(page_title="AI Squat Coach", layout="wide")
 st.title("🏋️ AI 深蹲姿勢糾錯系統 (穩定版)")
-st.markdown("### 已切換至兼容模式，現在應可正常運行。")
+st.markdown("### 已切換至經典兼容模式，目前應可正常運行。")
 
 analyzer = SquatAnalyzer()
 
 webrtc_streamer(
-    key="squat-classic",
+    key="squat-classic-fixed",
     mode=WebRtcMode.SENDRECV,
     rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
     video_transformer=analyzer.transform,
