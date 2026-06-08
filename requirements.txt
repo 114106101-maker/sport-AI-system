@@ -1,7 +1,4 @@
-numpy==1.26.4
-protobuf==3.20.3
+numpy<2.0.0
 mediapipe
 opencv-python-headless
 streamlit-webrtc
-streamlit
-pillow
